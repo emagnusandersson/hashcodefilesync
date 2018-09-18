@@ -9,12 +9,13 @@
 
 #include <iostream>
 #include <vector>
-#include <algorithm>    // std::sort
+#include <algorithm>    // std::sort, std::find
 #include <string>       // std::to_string
 #include <sstream>
 #include <boost/algorithm/string.hpp>
 #include <chrono>
 #include <errno.h>
+
 
 #if defined(__APPLE__)
 #  define COMMON_DIGEST_FOR_OPENSSL
@@ -28,24 +29,32 @@
 
 
 //
-// How to compile:
-//
-
-// Compile: g++ -o hashbert hashbert.cc -lcrypto -std=gnu++11 -O3
-// Compile for gdb: g++ -g -o hashbert hashbert.cc -lcrypto -std=gnu++11
+// Compile with:
+//   g++ -o hashbert hashbert.cc -lcrypto -std=gnu++17 -O3
+// Compile for gdb:
+//   g++ -g -o hashbert hashbert.cc -lcrypto -std=gnu++17
 
 // 
 // How to debug (typical debug session):
 //
 
 // gdb hashbert
-// break 365
-// run [arguments]
-// list      // List the code
-// finish    // Step out of function
+// b 365          // set breakpoint
+// r [arguments]  // run 
+// l              // List the code
+// p [variable]   // Print variable
+// finish         // Step out of function
+// i b   // list breakpoints
 
 
-// Google for "ansi vt100 codes" to learn about the codes in the printf-strings
+  // Google for "ansi vt100 codes" to learn about the codes in the printf-strings
+#define ANSI_CURSOR_SAVE        "\0337"
+#define ANSI_CURSOR_RESTORE     "\0338"
+#define ANSI_FONT_CLEAR         "\033[0m"
+#define ANSI_FONT_BOLD          "\033[1m"
+#define ANSI_CLEAR_BELOW        "\033[J"
+#define ANSI_CURSOR_UP(n)      "\033[" #n "A"
+
 
 int calcHashOfFile(const char *filename, char out[33]) {
   int i, nRead;
@@ -96,7 +105,9 @@ void writeFContentToTmpFile(FILE *fpt, const std::string strDir){  // Write fold
     std::string strPath;
     EntryT ent=*it;
 
-    strPath=strDir; strPath.append("/").append(ent.str);
+    //strPath=strDir; 
+    if(strDir==".") strPath=ent.str;
+    else {strPath=strDir; strPath.append("/").append(ent.str); }
     if (ent.boDir) {
       if (strcmp(ent.str.c_str(), ".") == 0 || strcmp(ent.str.c_str(), "..") == 0)     continue;
       writeFContentToTmpFile(fpt, strPath);
@@ -110,7 +121,7 @@ void writeFContentToTmpFile(FILE *fpt, const std::string strDir){  // Write fold
   closedir(dir);
 }
 std::chrono::steady_clock::time_point tStart = std::chrono::steady_clock::now();
-int toc(int &nHour, int &nMin, int &nSec){
+void toc(int &nHour, int &nMin, int &nSec){
   std::chrono::steady_clock::time_point tNow= std::chrono::steady_clock::now();
   int tDur=std::chrono::duration_cast<std::chrono::seconds> (tNow-tStart).count();
   nSec=tDur%60;
@@ -124,9 +135,9 @@ int createNewFile(FILE *fptNew, FILE *fptOld, FILE *fptTmp){  // Merge fptOld an
   unsigned int nRow=0, nReused=0, nRecalc=0, nDelete=0, nNew=0;
   int intTimeOld, intSizeOld, intTimeTmp, intSizeTmp;
   char strFileOld[LENFILENAME], strFileTmp[LENFILENAME];
-  //char strStatus[]="\033[F\r\033[2KWrote row: \033[1m%d/%d\033[0m, reused: \033[1m%d\033[0m, different modTime/size: \033[1m%d\033[0m, deleted: \033[1m%d\033[0m, new: \033[1m%d\033[0m  (file: \033[1m%s\033[0m)\n";
-  //char strStatus[]="Row: \033[1m%d/%d\033[0m, reused: \033[1m%d\033[0m, different modTime/size: \033[1m%d\033[0m, deleted: \033[1m%d\033[0m, new: \033[1m%d\033[0m\n";
-  char strStatus[]="%d:%02d:%02d, Writing row: \033[1m%d/%d\033[0m, reused: \033[1m%d\033[0m, different modTime/size: \033[1m%d\033[0m, deleted: \033[1m%d\033[0m, new: \033[1m%d\033[0m\n";
+  //char strStatus[]="\033[F\r\033[2KWrote row: " ANSI_FONT_BOLD "%d/%d" ANSI_FONT_CLEAR ", reused: " ANSI_FONT_BOLD "%d" ANSI_FONT_CLEAR ", different modTime/size: " ANSI_FONT_BOLD "%d" ANSI_FONT_CLEAR ", deleted: " ANSI_FONT_BOLD "%d" ANSI_FONT_CLEAR ", new: " ANSI_FONT_BOLD "%d" ANSI_FONT_CLEAR "  (file: " ANSI_FONT_BOLD "%s" ANSI_FONT_CLEAR ")\n";
+  //char strStatus[]="Row: " ANSI_FONT_BOLD "%d/%d" ANSI_FONT_CLEAR ", reused: " ANSI_FONT_BOLD "%d" ANSI_FONT_CLEAR ", different modTime/size: " ANSI_FONT_BOLD "%d" ANSI_FONT_CLEAR ", deleted: " ANSI_FONT_BOLD "%d" ANSI_FONT_CLEAR ", new: " ANSI_FONT_BOLD "%d" ANSI_FONT_CLEAR "\n";
+  char strStatus[]="%d:%02d:%02d, Writing row: " ANSI_FONT_BOLD "%d/%d" ANSI_FONT_CLEAR ", reused: " ANSI_FONT_BOLD "%d" ANSI_FONT_CLEAR ", different modTime/size: " ANSI_FONT_BOLD "%d" ANSI_FONT_CLEAR ", deleted: " ANSI_FONT_BOLD "%d" ANSI_FONT_CLEAR ", new: " ANSI_FONT_BOLD "%d" ANSI_FONT_CLEAR "\n";
     
     
   enum action { NONE, DONE, REMOVE, REUSE, RECALCULATE, NEWFILE };
@@ -157,7 +168,7 @@ int createNewFile(FILE *fptNew, FILE *fptOld, FILE *fptTmp){  // Merge fptOld an
       myAction=NEWFILE; boMakeReadTmp=1; nRow++;
     }else { myAction=DONE;  }
     
-    printf("\033[u\033[J"); // Reset cursor and clear everything below
+    printf(ANSI_CURSOR_RESTORE ANSI_CLEAR_BELOW); // Reset cursor and clear everything below
     if(myAction==REUSE){ printf("Reusing hash: "); nReused++; strHash=strHashOld; }
     else if(myAction==RECALCULATE){ printf("Recalculating hash: "); nRecalc++; strHash=strHashTmp; }
     else if(myAction==REMOVE){ printf("File removed: "); nDelete++; }
@@ -215,6 +226,7 @@ int interpreteFilterRow(std::string strRow, RuleT &rule){  // returns: 0=success
   std::string strPattTmp;
   char boInc=1;
   //char *strTrimed=trimwhitespace(strRow);
+  strRow = strRow.substr(0, strRow.find("#"));
   strRow=trimwhitespace(strRow);
   int lenTmp=strRow.length();
   //if(strlen(strTrimed)==1) {if(strTrimed[0]=='-') boIncDefault=0; else if(strTrimed[0]=='+') boIncDefault=1; 
@@ -222,7 +234,7 @@ int interpreteFilterRow(std::string strRow, RuleT &rule){  // returns: 0=success
   if(lenTmp){
     if(strRow[0]=='+') {boInc=1; strPattTmp=strRow.substr(1); }
     else if(strRow[0]=='-') { boInc=0; strPattTmp=strRow.substr(1); }
-    else if(strRow[0]=='#') { return 1; }
+    //else if(strRow[0]=='#') { return 1; }
     else  { boInc=1; strPattTmp=strRow; }
   } else return 1;
   //boost::trim(strPattTmp); 
@@ -269,9 +281,9 @@ int readFilterFile(const std::string filename) {
 
 
 //void check(FILE *fpt){  // Go through the hashcode-file, for each file, check if the hashcode matches the actual files hashcode
-int check(std::string strFileChk){  // Go through the hashcode-file, for each file, check if the hashcode matches the actual files hashcode  
+int check(std::string strFileChk, int intStart){  // Go through the hashcode-file, for each row (file), check if the hashcode matches the actual files hashcode  
   char strHash[33];
-  unsigned int nRowCount=0, nNotFound=0, nMissMatchTimeSize=0, nMissMatchHash=0, nOK=0;
+  unsigned int iRowCount=0, nNotFound=0, nMissMatchTimeSize=0, nMissMatchHash=0, nOK=0;
   //printf("OK\n");
   
   if(access(strFileChk.c_str(), F_OK)==-1) {perror(""); return 1;}
@@ -280,7 +292,8 @@ int check(std::string strFileChk){  // Go through the hashcode-file, for each fi
   //fclose(fptO);
 
     
-  printf("\n\n\033[2A\033[s");  // 2 newlines (makes it scroll if you are on the bottom line), then go up 2 rows, then save cursor
+  printf("\n\n" ANSI_CURSOR_UP(2) ANSI_CURSOR_SAVE);  // 2 newlines (makes it scroll if you are on the bottom line), then go up 2 rows, then save cursor
+  
   int nRule=vecRule.size();
   if(boIncAssigned!=2) boIncDefault=boIncAssigned;  // If "boIncDefault" is assigned by the user
   else { 
@@ -301,6 +314,9 @@ int check(std::string strFileChk){  // Go through the hashcode-file, for each fi
     if(fscanf(fpt,"%32s %d %d %1023[^\n]",strHashOld, &intTimeOld, &intSizeOld, strFile)!=4) boGotStuff=0;
     int nHour, nMin, nSec;
     if(boGotStuff){
+      iRowCount++;
+      if(iRowCount<intStart) { continue;}  // iRowCount / intStart (row number) is 1-indexed
+        // Test if the file is to be included (against rules)
       char boInc=boIncDefault;
       for(int i=0;i<nRule;i++) {
         std::string strPath;
@@ -313,16 +329,13 @@ int check(std::string strFileChk){  // Go through the hashcode-file, for each fi
       //int tDur=std::chrono::duration_cast<std::chrono::seconds> (tNow-tStart).count();
       
       toc(nHour, nMin, nSec);
-      //printf("\033[u\033[JChecking row: %d (%s)\n", nRowCount+1, strFile);
-      //printf("\033[u\033[JTime:%d, Checking row: %d (%s)\n", tDur, nRowCount+1, strFile);
-      printf("\033[u\033[J%d:%02d:%02d, Checking row: %d (%s)\n", nHour, nMin, nSec, nRowCount+1, strFile);
-      //if(calcHashOfFile(strFile,strHash)) {perror(strFile); return;}
+      printf(ANSI_CURSOR_RESTORE ANSI_CLEAR_BELOW "%d:%02d:%02d, Checking row: %d (%s)\n", nHour, nMin, nSec, iRowCount, strFile);
       int boErr=calcHashOfFile(strFile,strHash);
       if(boErr) {
         int errnoTmp = errno;
         if(errnoTmp==ENOENT) {
-          printf("\033[u\033[JNo such entry: %s\n", strFile);
-          printf("\n\n\033[2A\033[s");  // Save cursor
+          printf(ANSI_CURSOR_RESTORE ANSI_CLEAR_BELOW "Row:%d, ENOENT (file not found): %s\n", iRowCount, strFile);
+          printf("\n\n" ANSI_CURSOR_UP(2) ANSI_CURSOR_SAVE);  // Save cursor
           nNotFound++;
         }
         else {perror(strFile); return 1; }
@@ -334,92 +347,103 @@ int check(std::string strFileChk){  // Go through the hashcode-file, for each fi
             // Check modTime and size (perhaps the user forgott to run sync before running check
           struct stat st;
           if(stat(strFile, &st) != 0) perror(strFile);
-          if(st.st_mtim.tv_sec!=intTimeOld || st.st_size!=intSizeOld ){
-            if(strcmp(basename(strFile), strFileChk.c_str())==0) {
-              printf("\033[u\033[JMismatch (time/size)  (but this is expected for this file), %s\n", strFile);
-              printf("\n\n\033[2A\033[s");  // Save cursor
-            }else{    
-              printf("\033[u\033[JMismatch (time/size)  (sync was not called), %s\n", strFile);
-              printf("\n\n\033[2A\033[s");  // Save cursor
-            }
+          int boTMatch=st.st_mtim.tv_sec==intTimeOld, boSizeMatch=st.st_size==intSizeOld;
+          std::string strTmp=ANSI_CURSOR_RESTORE ANSI_CLEAR_BELOW "Row:%d, Mismatch: ";
+          if(!boTMatch || !boSizeMatch ){
+            if(!boTMatch) strTmp+="(time):"+std::to_string(intTimeOld)+"/"+std::to_string(st.st_mtim.tv_sec);
+            if(!boSizeMatch) strTmp+="(size):"+std::to_string(intSizeOld)+"/"+std::to_string(st.st_size);
+            
+            if(strcmp(basename(strFile), strFileChk.c_str())==0) { strTmp+=" (as expected)"; }  // else{ strTmp+="(sync wasn't called)";}
             nMissMatchTimeSize++;
-          }else{          
-            printf("\033[u\033[JMismatch, old=%s, new=%s, %s\n", strHashOld, strHash, strFile);
-            printf("\n\n\033[2A\033[s");  // Save cursor
+          }else{
+            strTmp+="(hash):"+std::string(strHashOld)+" / "+std::string(strHash);       
             nMissMatchHash++;
           }
+          strTmp+=", %s\n";
+          printf(strTmp.c_str(), iRowCount, strFile);
+          printf("\n\n" ANSI_CURSOR_UP(2) ANSI_CURSOR_SAVE);  // Save cursor
         }
         else nOK++;
       }
-      nRowCount++;
     }else {
       toc(nHour, nMin, nSec);
-      printf("\033[u\033[JTime:%d:%02d:%02d, Done (nRowCount %d, nNotFound %d, nMissMatchTimeSize %d, nMissMatchHash %d, nOK %d)\n", nHour, nMin, nSec, nRowCount, nNotFound, nMissMatchTimeSize, nMissMatchHash, nOK);
+      printf(ANSI_CURSOR_RESTORE ANSI_CLEAR_BELOW "Time: %d:%02d:%02d, Done (RowCount: %d, NotFound: %d, MissMatchTimeSize: %d, MissMatchHash: %d, OK: %d)\n", nHour, nMin, nSec, iRowCount, nNotFound, nMissMatchTimeSize, nMissMatchHash, nOK);
       break;
     }
   }
   return 0;
 }
 
-int countDash(const char *str){
-  if(str[0]=='-' && str[1]=='-') return 2;       else if(str[0]=='-') return 1;       else return 0;
-}
+
 void helpTextExit( int argc, char **argv){
   printf("Help text: see https://emagnusandersson.com/hashbert\n", argv[0]);
   exit(0);
 }
+
+class InputParser{
+  public:
+    InputParser (int &argc, char **argv){
+      for (int i=1; i < argc; ++i)
+        this->tokens.push_back(std::string(argv[i]));
+    }
+    /// @author iain
+    const std::string& getCmdOption(const std::string &option) const{
+      std::vector<std::string>::const_iterator itr;
+      itr =  std::find(this->tokens.begin(), this->tokens.end(), option);
+      if (itr != this->tokens.end() && ++itr != this->tokens.end()){
+        return *itr;
+      }
+      static const std::string empty_string("");
+      return empty_string;
+    }
+    /// @author iain
+    bool cmdOptionExists(const std::string &option) const{
+      return std::find(this->tokens.begin(), this->tokens.end(), option)
+        != this->tokens.end();
+    }
+  private:
+    std::vector <std::string> tokens;
+};
+
 //#include <boost/algorithm/string.hpp>
 int main( int argc, char **argv){
-  int i;
   char boCheck=0;
-  std::string strDir=".";
+  //std::string strDir=".";
   //std::string strFileChk, strFileTmp, strFileNew;     strFileChk=strFileTmp=strFileNew="hashcodes.txt";
-  std::string strFileChk, strFileNew;     strFileChk=strFileNew="hashcodes.txt";
-  if(argc==1){ helpTextExit(argc, argv); }
-  if(argc>1){
-    if(strcmp(argv[1],"sync")==0) boCheck=0;
-    else if(strcmp(argv[1],"check")==0) boCheck=1;
-    else if(strcmp(argv[1],"--help")==0 || strcmp(argv[1],"-h")==0) helpTextExit(argc, argv);
-    else helpTextExit(argc, argv);
+  //std::string strFileChk, strFileNew;     strFileChk=strFileNew="hashcodes.txt";
+  
+  InputParser input(argc, argv);
+  if(argc==1 || input.cmdOptionExists("-h") || input.cmdOptionExists("--help") ){ helpTextExit(argc, argv);   }
+  if(strcmp(argv[1],"sync")==0) boCheck=0;
+  else if(strcmp(argv[1],"check")==0) boCheck=1;
+  else { helpTextExit(argc, argv);   }
+  
+  const std::string &strFilter = input.getCmdOption("-r");
+  if(!strFilter.empty()){
+    if(!boCheck) {printf("Filter rules (the -r option) can only be used with \"check\"\n"); exit(0);}
+    readFilterFrCommandLine(strFilter);
   }
-  for(i=2;i<argc;i++){
-    int nDash=countDash(argv[i]);
-    if(nDash==1) {
-      char tmpc=argv[i][1];
-      if(tmpc=='r') {
-        //if(i+1>=argc || countDash(argv[i+1])) {printf("-r should be followed by filter rules. Like \"+./inclDir;-./exclDir\". Delimited by semicolons \";\" and wrapped by quotation marks (\"\").\n"); exit(0); }
-        if(boCheck==0) {printf("Filtering is only available when \"check\"-ing\n"); exit(0); }
-        if(strlen(argv[i])<=2) {printf("The -r option should have the rules comming directly after it (that is no space) Ex: -r+./myDir or \"-r-./exclDir;+./inclDir\"\n"); exit(0); }
-        //Don't let the string start with \"-\" (You can use a \";\" in front of it for example. (sorry for this inconsistency)).
-        else {
-          //readFilterFrCommandLine(argv[i+1]);
-          readFilterFrCommandLine(&(argv[i][2]));
-          /*RuleT ruleTmp;
-          if(interpreteFilterRow(argv[i+1], ruleTmp)==0){
-            if(ruleTmp.str.length()) vecRule.push_back(ruleTmp); else boIncDefault=ruleTmp.boInc;
-          }*/
-          i++;
-        }
-      }else if(tmpc=='F') {
-        std::string strFileFilter="";
-        if(boCheck==0) {printf("Filtering is only available when \"check\"-ing\n"); exit(0); }
-        if(i+1>=argc || countDash(argv[i+1])) { strFileFilter=".hashbert_filter"; }
-        else {   strFileFilter=argv[i+1]; i++;  }
-        //readFilterFile(strFileFilter);
-        if(readFilterFile(strFileFilter)) {perror("Error in readFilterFile"); return 1;}
-      }else if(tmpc=='f') {
-        if(i+1>=argc || countDash(argv[i+1])) {printf("-f should be followed by the hashcode-file\n"); exit(0); }
-        //strFileChk=strFileTmp=strFileNew=argv[i+1]; i++;
-        strFileChk=strFileNew=argv[i+1]; i++;
-      }else if(tmpc=='d') {
-        if(i+1>=argc || countDash(argv[i+1])) {printf("-d should be followed by a directory\n"); exit(0); }
-        strDir=argv[i+1];  i++;
-      }else if(tmpc=='h') helpTextExit(argc, argv);
-    }else if(nDash==2) {
-      char *tmp=&argv[i][2];
-      if(strcmp(tmp,"help")==0) helpTextExit(argc, argv);
-    }
+  //if(input.cmdOptionExists("-F")){ 
+    //if(!boCheck) {printf("Filter rules (the -F option) can only be used with \"check\"\n"); exit(0);}
+    //const std::string &strFileFilterTmp = input.getCmdOption("-F");
+    //std::string strFileFilter=strFileFilterTmp;
+    //if(strFileFilterTmp.empty())  strFileFilter=".hashbert_filter";
+    //if(readFilterFile(strFileFilter)) {perror("Error in readFilterFile"); return 1;}
+  //}
+  if(input.cmdOptionExists("-F")){ 
+    if(!boCheck) {printf("Filter rules (the -F option) can only be used with \"check\"\n"); exit(0);}
+    std::string strFileFilter = input.getCmdOption("-F");
+    if(strFileFilter.empty() || strFileFilter[0]=='-')  strFileFilter=".hashbert_filter";
+    if(readFilterFile(strFileFilter)) {perror("Error in readFilterFile"); return 1;}
   }
+  std::string strFileChk, strFileNew;  strFileChk=strFileNew= input.getCmdOption("-f");
+  if(strFileChk.empty()) strFileChk=strFileNew="hashcodes.txt";
+   
+  std::string strDir = input.getCmdOption("-d");  if(strDir.empty()) strDir=".";
+  std::string strStart = input.getCmdOption("--start"); if(strStart.empty()) strStart="0";
+  int intStart = std::stoi(strStart);
+  
+
 
   //strFileTmp.append(".filesonly.tmp");
   strFileNew.append(".new.tmp");
@@ -431,7 +455,7 @@ int main( int argc, char **argv){
     //check(fptOld);
     //fclose(fptOld);
     
-    if(check(strFileChk)) {perror("Error in check"); return 1;}
+    if(check(strFileChk, intStart)) {perror("Error in check"); return 1;}
   }else{
     int fd;
     char strFileTmp[] = "/tmp/fileXXXXXX";
@@ -439,8 +463,8 @@ int main( int argc, char **argv){
     FILE *fptTmp=tmpfile();
     //FILE *fptTmp = fopen(strFileTmp.c_str(), "w+");
 
-    printf("\n\n\n\n\033[4A");  // 4 newlines (makes it scroll if you are on the bottom line), then go up 4 rows
-    printf("Reading filenames, modification dates and file sizes from the selected folder.\n\033[s");  // Save cursor at the end
+    printf("\n\n\n\n" ANSI_CURSOR_UP(4));  // 4 newlines (makes it scroll if you are on the bottom line), then go up 4 rows
+    printf("Reading filenames, modification dates and file sizes from the selected folder.\n" ANSI_CURSOR_SAVE);  // Save cursor at the end
     writeFContentToTmpFile(fptTmp, strDir);
     FILE *fptOld = fopen(strFileChk.c_str(), "a+");  // By using "a+" (reading and appending) the file is created if it doesn't exist.
     FILE *fptNew = fopen(strFileNew.c_str(), "w");
